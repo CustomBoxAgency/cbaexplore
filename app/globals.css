@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* CBA brand */
+  --gd: #032D23;
+  --tl: #2DCCD3;
+  --td: #086F78;
+  --cream: #f5f4f0;
+  --ink: #0f172a;
+
+  /* Per-portal accent (overridden inline) */
+  --brand1: #032D23;
+  --brand2: #2DCCD3;
+  --brand-text: #ffffff;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: "Nunito Sans", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  color: var(--ink);
+  background: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+
+.font-ui {
+  font-family: var(--font-nunito-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Sharp corners — CBA design system */
+input,
+button,
+textarea,
+select {
+  border-radius: 0;
+}
