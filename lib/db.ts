@@ -1,25 +1,13 @@
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+import { sql } from "@vercel/postgres";
 import { SAMPLE_CLIENTS, brandFromUrl } from "./data";
 
-const DATA_DIR = process.env.VERCEL
-  ? "/tmp"
-  : path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "cba.db");
+let _initialized = false;
 
-let _db: Database.Database | null = null;
-
-function ensureDb(): Database.Database {
-  if (_db) return _db;
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-
-  db.exec(`
+async function ensureInit(): Promise<void> {
+  if (_initialized) return;
+  await sql`
     CREATE TABLE IF NOT EXISTS clients (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      id          SERIAL PRIMARY KEY,
       name        TEXT NOT NULL,
       contact     TEXT,
       url         TEXT,
@@ -29,36 +17,22 @@ function ensureDb(): Database.Database {
       industry    TEXT,
       status      TEXT DEFAULT 'draft',
       viewed      INTEGER DEFAULT 0,
-      created_at  TEXT DEFAULT (datetime('now')),
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
       hook        TEXT
-    );
-  `);
-
-  _db = db;
-  seedIfEmpty(db);
-  return db;
-}
-
-function seedIfEmpty(db: Database.Database) {
-  const row = db.prepare("SELECT COUNT(*) AS n FROM clients").get() as { n: number };
-  if (row.n > 0) return;
-  const insert = db.prepare(`
-    INSERT INTO clients (name, contact, url, slug, color1, color2, industry, status, hook)
-    VALUES (@name, @contact, @url, @slug, @color1, @color2, @industry, 'active', @hook)
-  `);
-  for (const s of SAMPLE_CLIENTS) {
-    const palette = brandFromUrl(s.url);
-    insert.run({
-      name: s.name,
-      contact: s.contact,
-      url: s.url,
-      slug: s.slug,
-      color1: palette.color1,
-      color2: palette.color2,
-      industry: s.industry,
-      hook: s.hook,
-    });
+    )
+  `;
+  const { rows } = await sql<{ count: string }>`SELECT COUNT(*)::text AS count FROM clients`;
+  if (Number(rows[0].count) === 0) {
+    for (const s of SAMPLE_CLIENTS) {
+      const palette = brandFromUrl(s.url);
+      await sql`
+        INSERT INTO clients (name, contact, url, slug, color1, color2, industry, status, hook)
+        VALUES (${s.name}, ${s.contact}, ${s.url}, ${s.slug},
+                ${palette.color1}, ${palette.color2}, ${s.industry}, 'active', ${s.hook})
+      `;
+    }
   }
+  _initialized = true;
 }
 
 export type Client = {
@@ -80,54 +54,91 @@ export type NewClient = Omit<Client, "id" | "viewed" | "created_at" | "status"> 
   status?: string;
 };
 
-export function listClients(): Client[] {
-  return ensureDb().prepare("SELECT * FROM clients ORDER BY created_at DESC").all() as Client[];
+export async function listClients(): Promise<Client[]> {
+  await ensureInit();
+  const { rows } = await sql<Client>`SELECT * FROM clients ORDER BY created_at DESC`;
+  return rows;
 }
 
-export function getClientBySlug(slug: string): Client | undefined {
-  return ensureDb()
-    .prepare("SELECT * FROM clients WHERE slug = ?")
-    .get(slug) as Client | undefined;
+export async function getClientBySlug(slug: string): Promise<Client | undefined> {
+  await ensureInit();
+  const { rows } = await sql<Client>`SELECT * FROM clients WHERE slug = ${slug}`;
+  return rows[0];
 }
 
-export function createClient(c: NewClient): Client {
-  const stmt = ensureDb().prepare(`
+export async function createClient(c: NewClient): Promise<Client> {
+  await ensureInit();
+  const { rows } = await sql<Client>`
     INSERT INTO clients (name, contact, url, slug, color1, color2, industry, status, hook)
-    VALUES (@name, @contact, @url, @slug, @color1, @color2, @industry, @status, @hook)
-  `);
-  const info = stmt.run({
-    name: c.name,
-    contact: c.contact ?? null,
-    url: c.url ?? null,
-    slug: c.slug,
-    color1: c.color1 ?? null,
-    color2: c.color2 ?? null,
-    industry: c.industry ?? null,
-    status: c.status ?? "draft",
-    hook: c.hook ?? null,
-  });
-  return ensureDb()
-    .prepare("SELECT * FROM clients WHERE id = ?")
-    .get(info.lastInsertRowid) as Client;
+    VALUES (${c.name}, ${c.contact ?? null}, ${c.url ?? null}, ${c.slug},
+            ${c.color1 ?? null}, ${c.color2 ?? null}, ${c.industry ?? null},
+            ${c.status ?? "draft"}, ${c.hook ?? null})
+    RETURNING *
+  `;
+  return rows[0];
 }
 
-export function updateClient(slug: string, patch: Partial<NewClient>): Client | undefined {
-  const existing = getClientBySlug(slug);
+const PATCHABLE = [
+  "name",
+  "contact",
+  "url",
+  "color1",
+  "color2",
+  "industry",
+  "status",
+  "hook",
+] as const;
+
+export async function updateClient(
+  slug: string,
+  patch: Partial<NewClient>
+): Promise<Client | undefined> {
+  await ensureInit();
+  const existing = await getClientBySlug(slug);
   if (!existing) return undefined;
-  const fields = Object.keys(patch);
-  if (fields.length === 0) return existing;
-  const set = fields.map((f) => `${f} = @${f}`).join(", ");
-  ensureDb().prepare(`UPDATE clients SET ${set} WHERE slug = @slug`).run({ ...patch, slug });
+
+  for (const key of PATCHABLE) {
+    if (!(key in patch)) continue;
+    const value = (patch as Record<string, unknown>)[key] ?? null;
+    switch (key) {
+      case "name":
+        await sql`UPDATE clients SET name = ${value as string} WHERE slug = ${slug}`;
+        break;
+      case "contact":
+        await sql`UPDATE clients SET contact = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+      case "url":
+        await sql`UPDATE clients SET url = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+      case "color1":
+        await sql`UPDATE clients SET color1 = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+      case "color2":
+        await sql`UPDATE clients SET color2 = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+      case "industry":
+        await sql`UPDATE clients SET industry = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+      case "status":
+        await sql`UPDATE clients SET status = ${value as string} WHERE slug = ${slug}`;
+        break;
+      case "hook":
+        await sql`UPDATE clients SET hook = ${value as string | null} WHERE slug = ${slug}`;
+        break;
+    }
+  }
   return getClientBySlug(slug);
 }
 
-export function deleteClient(slug: string): boolean {
-  const info = ensureDb().prepare("DELETE FROM clients WHERE slug = ?").run(slug);
-  return info.changes > 0;
+export async function deleteClient(slug: string): Promise<boolean> {
+  await ensureInit();
+  const { rowCount } = await sql`DELETE FROM clients WHERE slug = ${slug}`;
+  return (rowCount ?? 0) > 0;
 }
 
-export function markViewed(slug: string): void {
-  ensureDb().prepare("UPDATE clients SET viewed = 1 WHERE slug = ?").run(slug);
+export async function markViewed(slug: string): Promise<void> {
+  await ensureInit();
+  await sql`UPDATE clients SET viewed = 1 WHERE slug = ${slug}`;
 }
 
 export function slugify(input: string): string {
@@ -139,11 +150,11 @@ export function slugify(input: string): string {
     .slice(0, 60);
 }
 
-export function uniqueSlug(base: string): string {
+export async function uniqueSlug(base: string): Promise<string> {
   const root = slugify(base) || `client-${Date.now()}`;
   let candidate = root;
   let n = 2;
-  while (getClientBySlug(candidate)) {
+  while (await getClientBySlug(candidate)) {
     candidate = `${root}-${n++}`;
   }
   return candidate;
