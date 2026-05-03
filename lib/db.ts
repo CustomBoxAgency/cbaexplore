@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { SAMPLE_CLIENTS, brandFromUrl } from "./data";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.VERCEL
+  ? "/tmp"
+  : path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "cba.db");
 
 let _db: Database.Database | null = null;
