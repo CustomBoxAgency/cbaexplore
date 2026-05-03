@@ -1,3 +1,4 @@
+ 
 # Explore CBA
 
 Sales portal generator for **Custom Box Agency**. Each prospect gets a personalized, color-matched walkthrough at `/[slug]`.
