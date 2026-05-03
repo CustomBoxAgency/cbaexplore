@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return NextResponse.json(listClients());
+    return NextResponse.json(await listClients());
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "failed" },
@@ -21,10 +21,10 @@ export async function POST(req: NextRequest) {
     if (!body?.name || typeof body.name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
-    const slug = uniqueSlug(body.slug || body.name);
+    const slug = await uniqueSlug(body.slug || body.name);
     const industry = body.industry || detectIndustry(body.url);
     const fallbackPalette = brandFromUrl(body.url);
-    const created = createClient({
+    const created = await createClient({
       name: body.name,
       contact: body.contact ?? null,
       url: body.url ?? null,
