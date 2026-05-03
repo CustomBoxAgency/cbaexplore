@@ -4,13 +4,13 @@ import { getClientBySlug, markViewed } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default function ClientPortalPage({
+export default async function ClientPortalPage({
   params,
 }: {
   params: { slug: string };
 }) {
-  const client = getClientBySlug(params.slug);
+  const client = await getClientBySlug(params.slug);
   if (!client) notFound();
-  markViewed(params.slug);
+  await markViewed(params.slug);
   return <PortalShell client={{ ...client, viewed: 1 }} />;
 }
